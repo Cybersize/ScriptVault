@@ -7,54 +7,69 @@ import { Copy, Code2 } from "lucide-react";
 export default function AdminLuaLoader() {
   const { toast } = useToast();
 
-  const loaderCode = `-- ScriptVault Lua Loader
--- Replace YOUR_LICENSE_KEY and YOUR_HWID with actual values
+  const loaderCode = `-- ScriptVault Lua Loader v2
+-- Compatible with: Synapse X, KRNL, Fluxus, Solara, and most modern executors
+-- Edit the three lines below, then run.
 
 local HttpService = game:GetService("HttpService")
-local BASE_URL = "${window.location.origin}/api"
-local LICENSE_KEY = "YOUR_LICENSE_KEY"
-local HWID = game:GetService("RbxAnalyticsService"):GetClientId()
-local SCRIPT_ID = 1  -- change to your script ID
+local BASE_URL    = "https://YOUR-DOMAIN.replit.app/api"
+local LICENSE_KEY = "XXXX-XXXX-XXXX-XXXX"
+local SCRIPT_ID   = 1   -- change to the script ID you want to load
+local HWID        = tostring(game:GetService("RbxAnalyticsService"):GetClientId())
 
--- Validate license
-local function validate()
-    local res = syn.request and syn.request({
-        Url = BASE_URL .. "/validate",
-        Method = "POST",
-        Headers = { ["Content-Type"] = "application/json" },
-        Body = HttpService:JSONEncode({ key = LICENSE_KEY, hwid = HWID })
-    })
-    if not res or res.StatusCode ~= 200 then
-        error("Network error during validation")
-    end
-    local data = HttpService:JSONDecode(res.Body)
-    if not data.valid then
-        error("License invalid: " .. (data.message or "unknown"))
-    end
-    return true
+-- ── HTTP detection (cross-executor) ────────────────────────────────────────
+local httpRequest
+if syn and type(syn) == "table" and syn.request then
+    httpRequest = syn.request                -- Synapse X
+elseif type(http) == "table" and http.request then
+    httpRequest = http.request               -- some custom environments
+elseif type(request) == "function" then
+    httpRequest = request                    -- KRNL, Fluxus, Solara, etc.
+elseif type(http_request) == "function" then
+    httpRequest = http_request               -- older executors
+else
+    error("[ScriptVault] No HTTP function found. Use an executor that supports HTTP requests.")
 end
 
--- Request script delivery
-local function fetchScript()
-    local res = syn.request({
-        Url = BASE_URL .. "/scripts/" .. SCRIPT_ID .. "/deliver",
-        Method = "POST",
+-- ── Helpers ─────────────────────────────────────────────────────────────────
+local function post(path, body)
+    local ok, res = pcall(httpRequest, {
+        Url     = BASE_URL .. path,
+        Method  = "POST",
         Headers = { ["Content-Type"] = "application/json" },
-        Body = HttpService:JSONEncode({ key = LICENSE_KEY, hwid = HWID })
+        Body    = HttpService:JSONEncode(body),
     })
-    if not res or res.StatusCode ~= 200 then
-        error("Failed to fetch script: " .. (res and res.StatusCode or "no response"))
+    if not ok then
+        error("HTTP error: " .. tostring(res))
     end
-    local data = HttpService:JSONDecode(res.Body)
-    return data.script
+    if res.StatusCode == 403 then
+        local data = HttpService:JSONDecode(res.Body)
+        error("Access denied: " .. (data.error or "unknown reason"))
+    end
+    if res.StatusCode ~= 200 then
+        error("Server returned " .. tostring(res.StatusCode))
+    end
+    return HttpService:JSONDecode(res.Body)
 end
 
--- Run
+-- ── Main ─────────────────────────────────────────────────────────────────────
 local ok, err = pcall(function()
-    validate()
-    local code = fetchScript()
-    local fn, loadErr = loadstring(code)
-    if not fn then error("Parse error: " .. tostring(loadErr)) end
+    -- Step 1: validate license
+    local auth = post("/validate", { key = LICENSE_KEY, hwid = HWID })
+    if not auth.valid then
+        error(auth.message or "Invalid license")
+    end
+
+    -- Step 2: fetch & execute the encrypted script
+    local result = post("/scripts/" .. SCRIPT_ID .. "/deliver", {
+        key  = LICENSE_KEY,
+        hwid = HWID,
+    })
+
+    local fn, loadErr = loadstring(result.script)
+    if not fn then
+        error("Failed to parse script: " .. tostring(loadErr))
+    end
     fn()
 end)
 
@@ -106,8 +121,9 @@ end`;
                 </code>
               </pre>
             </div>
-            <div className="mt-4 p-4 bg-muted/30 border border-border rounded text-sm font-mono text-muted-foreground">
-              <strong className="text-foreground">Requirements:</strong> Requires an execution environment that supports <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">syn.request</code> and <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">loadstring</code>.
+            <div className="mt-4 p-4 bg-muted/30 border border-border rounded text-sm font-mono text-muted-foreground space-y-2">
+              <div><strong className="text-foreground">Executor support:</strong> Auto-detects HTTP function — works with Synapse X <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">syn.request</code>, KRNL/Fluxus/Solara <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">request</code>, and legacy <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">http_request</code>.</div>
+              <div><strong className="text-foreground">Setup:</strong> Replace <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">YOUR-DOMAIN</code> with your deployed URL, set the <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">LICENSE_KEY</code> and <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">SCRIPT_ID</code>.</div>
             </div>
           </CardContent>
         </Card>
