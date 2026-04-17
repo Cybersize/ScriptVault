@@ -3,13 +3,24 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Lua Script Licensing Platform API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: licenses
+    description: License key management
+  - name: scripts
+    description: Script management
+  - name: logs
+    description: Access log management
+  - name: validate
+    description: Public license validation
+  - name: stats
+    description: Dashboard statistics
+
 paths:
   /healthz:
     get:
@@ -24,6 +35,300 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ─── Public endpoints (no auth) ─────────────────────────────────────────────
+
+  /validate:
+    post:
+      operationId: validateLicense
+      tags: [validate]
+      summary: Validate a license key
+      description: Public endpoint used by the Lua loader to validate a license key and bind HWID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateLicenseBody"
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidateLicenseResponse"
+        "400":
+          description: Bad request
+
+  /scripts/{scriptId}/deliver:
+    post:
+      operationId: deliverScript
+      tags: [validate]
+      summary: Deliver a decrypted script to authenticated client
+      description: Validates key, decrypts script in memory, watermarks, and returns it
+      parameters:
+        - name: scriptId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliverScriptBody"
+      responses:
+        "200":
+          description: Decrypted script text
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverScriptResponse"
+        "403":
+          description: Forbidden (invalid/expired/revoked key or HWID mismatch)
+        "404":
+          description: Script not found
+
+  # ─── Admin endpoints (require X-Admin-Secret header) ─────────────────────────
+
+  /admin/licenses:
+    get:
+      operationId: listLicenses
+      tags: [licenses]
+      summary: List all license keys
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: ["string", "null"]
+            enum: [active, revoked, expired, null]
+        - name: search
+          in: query
+          schema:
+            type: ["string", "null"]
+      responses:
+        "200":
+          description: List of licenses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/License"
+        "401":
+          description: Unauthorized
+    post:
+      operationId: createLicense
+      tags: [licenses]
+      summary: Generate a new license key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLicenseBody"
+      responses:
+        "201":
+          description: Created license
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/License"
+        "401":
+          description: Unauthorized
+
+  /admin/licenses/{id}:
+    get:
+      operationId: getLicense
+      tags: [licenses]
+      summary: Get a license by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: License
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/License"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateLicense
+      tags: [licenses]
+      summary: Update a license (revoke, change expiry, etc.)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLicenseBody"
+      responses:
+        "200":
+          description: Updated license
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/License"
+        "404":
+          description: Not found
+    delete:
+      operationId: deleteLicense
+      tags: [licenses]
+      summary: Delete a license key
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+
+  /admin/licenses/{id}/revoke:
+    post:
+      operationId: revokeLicense
+      tags: [licenses]
+      summary: Revoke a license key
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Revoked license
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/License"
+        "404":
+          description: Not found
+
+  /admin/scripts:
+    get:
+      operationId: listScripts
+      tags: [scripts]
+      summary: List all scripts
+      responses:
+        "200":
+          description: List of scripts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Script"
+    post:
+      operationId: createScript
+      tags: [scripts]
+      summary: Upload and encrypt a Lua script
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateScriptBody"
+      responses:
+        "201":
+          description: Created script record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Script"
+
+  /admin/scripts/{id}:
+    get:
+      operationId: getScript
+      tags: [scripts]
+      summary: Get a script by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Script
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Script"
+        "404":
+          description: Not found
+    delete:
+      operationId: deleteScript
+      tags: [scripts]
+      summary: Delete a script
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+
+  /admin/logs:
+    get:
+      operationId: listLogs
+      tags: [logs]
+      summary: List access logs
+      parameters:
+        - name: licenseId
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: status
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: limit
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: List of access logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AccessLog"
+
+  /admin/stats:
+    get:
+      operationId: getStats
+      tags: [stats]
+      summary: Get dashboard statistics
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +339,212 @@ components:
       required:
         - status
 
+    License:
+      type: object
+      properties:
+        id:
+          type: integer
+        key:
+          type: string
+        hwid:
+          type: ["string", "null"]
+        expiresAt:
+          type: ["string", "null"]
+        revoked:
+          type: boolean
+        note:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        usageCount:
+          type: integer
+      required:
+        - id
+        - key
+        - hwid
+        - expiresAt
+        - revoked
+        - note
+        - createdAt
+        - usageCount
+
+    CreateLicenseBody:
+      type: object
+      properties:
+        expiresAt:
+          type: ["string", "null"]
+          description: ISO 8601 date string, null for never-expiring
+        note:
+          type: ["string", "null"]
+          description: Optional label/note for this license
+      required: []
+
+    UpdateLicenseBody:
+      type: object
+      properties:
+        revoked:
+          type: ["boolean", "null"]
+        expiresAt:
+          type: ["string", "null"]
+        note:
+          type: ["string", "null"]
+        hwid:
+          type: ["string", "null"]
+      required: []
+
+    Script:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        version:
+          type: string
+        encryptedPath:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - name
+        - description
+        - version
+        - encryptedPath
+        - createdAt
+        - updatedAt
+
+    CreateScriptBody:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        version:
+          type: string
+        content:
+          type: string
+          description: Raw Lua script content to encrypt and store
+      required:
+        - name
+        - version
+        - content
+
+    AccessLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        licenseId:
+          type: ["integer", "null"]
+        licenseKey:
+          type: ["string", "null"]
+        scriptId:
+          type: ["integer", "null"]
+        ip:
+          type: ["string", "null"]
+        hwid:
+          type: ["string", "null"]
+        status:
+          type: string
+        message:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required:
+        - id
+        - licenseId
+        - licenseKey
+        - scriptId
+        - ip
+        - hwid
+        - status
+        - message
+        - createdAt
+
+    ValidateLicenseBody:
+      type: object
+      properties:
+        key:
+          type: string
+        hwid:
+          type: string
+      required:
+        - key
+        - hwid
+
+    ValidateLicenseResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        message:
+          type: string
+        licenseId:
+          type: ["integer", "null"]
+      required:
+        - valid
+        - message
+        - licenseId
+
+    DeliverScriptBody:
+      type: object
+      properties:
+        key:
+          type: string
+        hwid:
+          type: string
+      required:
+        - key
+        - hwid
+
+    DeliverScriptResponse:
+      type: object
+      properties:
+        script:
+          type: string
+          description: Decrypted and watermarked Lua script
+        version:
+          type: string
+      required:
+        - script
+        - version
+
+    DashboardStats:
+      type: object
+      properties:
+        totalLicenses:
+          type: integer
+        activeLicenses:
+          type: integer
+        revokedLicenses:
+          type: integer
+        expiredLicenses:
+          type: integer
+        totalScripts:
+          type: integer
+        totalRequests:
+          type: integer
+        successfulRequests:
+          type: integer
+        failedRequests:
+          type: integer
+        recentActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccessLog"
+      required:
+        - totalLicenses
+        - activeLicenses
+        - revokedLicenses
+        - expiredLicenses
+        - totalScripts
+        - totalRequests
+        - successfulRequests
+        - failedRequests
+        - recentActivity
