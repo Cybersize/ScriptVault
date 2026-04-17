@@ -7,31 +7,75 @@ import { Copy, Code2 } from "lucide-react";
 export default function AdminLuaLoader() {
   const { toast } = useToast();
 
-  const loaderCode = `-- ScriptVault Lua Loader v2
--- Compatible with: Synapse X, KRNL, Fluxus, Solara, and most modern executors
--- Edit the three lines below, then run.
-
-local HttpService = game:GetService("HttpService")
+  const loaderCode = `-- ╔═══════════════════════════════════════════════════╗
+-- ║          ScriptVault Lua Loader  v3              ║
+-- ║  Universal — works on every major executor       ║
+-- ╚═══════════════════════════════════════════════════╝
+--
+--  EDIT THESE THREE LINES ONLY:
 local BASE_URL    = "https://YOUR-DOMAIN.replit.app/api"
 local LICENSE_KEY = "XXXX-XXXX-XXXX-XXXX"
-local SCRIPT_ID   = 1   -- change to the script ID you want to load
-local HWID        = tostring(game:GetService("RbxAnalyticsService"):GetClientId())
+local SCRIPT_ID   = 1   -- numeric ID from your admin panel
+--
+-- ────────────────────────────────────────────────────
 
--- ── HTTP detection (cross-executor) ────────────────────────────────────────
+local HttpService = game:GetService("HttpService")
+local HWID = tostring(
+    pcall(function() return game:GetService("RbxAnalyticsService"):GetClientId() end)
+    and game:GetService("RbxAnalyticsService"):GetClientId()
+    or tostring(game.JobId ~= "" and game.JobId or math.random(1e9))
+)
+
+-- ── Universal HTTP detection (pcall-guarded) ────────────────────────────────
+--  Tested against: Synapse X · Script-Ware · KRNL · Fluxus · Solara
+--                  Delta · Electron · Wave · Oxygen U · Evon · Celery
+--                  Arceus X · Hydrogen · Vega X · Xeno · AWP X · Comet
+--                  Nihon · Temple · Coco Z · JJSploit · WeAreDevs API
 local httpRequest
-if syn and type(syn) == "table" and syn.request then
-    httpRequest = syn.request                -- Synapse X
-elseif type(http) == "table" and http.request then
-    httpRequest = http.request               -- some custom environments
-elseif type(request) == "function" then
-    httpRequest = request                    -- KRNL, Fluxus, Solara, etc.
-elseif type(http_request) == "function" then
-    httpRequest = http_request               -- older executors
-else
-    error("[ScriptVault] No HTTP function found. Use an executor that supports HTTP requests.")
+do
+    local candidates = {
+        -- Modern standard (KRNL, Fluxus, Solara, Delta, Script-Ware,
+        -- Electron, Wave, Oxygen U, Evon, Arceus X, Hydrogen, Vega X,
+        -- Xeno, Comet, Celery, Coco Z, AWP X, Temple, Nihon, JJSploit, …)
+        function() return type(request)             == "function" and request      end,
+        -- Synapse X / legacy syn namespace
+        function() return type(syn)                 == "table"
+                      and type(syn.request)         == "function" and syn.request  end,
+        -- Older executor global
+        function() return type(http_request)        == "function" and http_request end,
+        -- http namespace (some environments)
+        function() return type(http)                == "table"
+                      and type(http.request)        == "function" and http.request end,
+        -- getgenv fallback (catches executors that inject into the global env late)
+        function() return type(getgenv)             == "function"
+                      and type(getgenv().request)   == "function" and getgenv().request end,
+        -- fluxus namespace
+        function() return type(fluxus)              == "table"
+                      and type(fluxus.request)      == "function" and fluxus.request end,
+        -- WeAreDevs / JJSploit HTTPS
+        function() return type(HTTPS)               == "table"
+                      and type(HTTPS.Request)       == "function"
+                      and function(t)
+                              return HTTPS.Request(t.Url, t.Method, t.Headers, t.Body)
+                          end                                                       end,
+    }
+
+    for _, probe in ipairs(candidates) do
+        local ok, fn = pcall(probe)
+        if ok and fn then
+            httpRequest = fn
+            break
+        end
+    end
+
+    if not httpRequest then
+        error("[ScriptVault] No HTTP function found.\n"
+            .."Your executor does not support HTTP requests, or it is outdated.\n"
+            .."Try: Solara, KRNL, Delta, Fluxus, or Script-Ware.")
+    end
 end
 
--- ── Helpers ─────────────────────────────────────────────────────────────────
+-- ── HTTP helper ──────────────────────────────────────────────────────────────
 local function post(path, body)
     local ok, res = pcall(httpRequest, {
         Url     = BASE_URL .. path,
@@ -40,41 +84,51 @@ local function post(path, body)
         Body    = HttpService:JSONEncode(body),
     })
     if not ok then
-        error("HTTP error: " .. tostring(res))
+        error("[ScriptVault] Request failed: " .. tostring(res))
     end
+    if not res or not res.StatusCode then
+        error("[ScriptVault] Invalid response from server")
+    end
+    local data = HttpService:JSONDecode(res.Body)
     if res.StatusCode == 403 then
-        local data = HttpService:JSONDecode(res.Body)
-        error("Access denied: " .. (data.error or "unknown reason"))
+        error("[ScriptVault] Access denied: " .. (data.error or "unknown"))
+    end
+    if res.StatusCode == 429 then
+        error("[ScriptVault] Rate limited — wait a moment and try again")
     end
     if res.StatusCode ~= 200 then
-        error("Server returned " .. tostring(res.StatusCode))
+        error("[ScriptVault] Server error " .. res.StatusCode .. ": " .. (data.error or ""))
     end
-    return HttpService:JSONDecode(res.Body)
+    return data
 end
 
 -- ── Main ─────────────────────────────────────────────────────────────────────
 local ok, err = pcall(function()
-    -- Step 1: validate license
+    -- 1. Validate license + bind HWID on first use
     local auth = post("/validate", { key = LICENSE_KEY, hwid = HWID })
     if not auth.valid then
-        error(auth.message or "Invalid license")
+        error(auth.message or "Invalid license key")
     end
 
-    -- Step 2: fetch & execute the encrypted script
-    local result = post("/scripts/" .. SCRIPT_ID .. "/deliver", {
+    -- 2. Fetch encrypted script, decrypted + watermarked by server
+    local result = post("/scripts/" .. tostring(SCRIPT_ID) .. "/deliver", {
         key  = LICENSE_KEY,
         hwid = HWID,
     })
+    if not result.script or result.script == "" then
+        error("Server returned an empty script")
+    end
 
+    -- 3. Execute
     local fn, loadErr = loadstring(result.script)
     if not fn then
-        error("Failed to parse script: " .. tostring(loadErr))
+        error("Script parse error: " .. tostring(loadErr))
     end
     fn()
 end)
 
 if not ok then
-    warn("[ScriptVault] Error: " .. tostring(err))
+    warn("[ScriptVault] " .. tostring(err))
 end`;
 
   const handleCopy = () => {
@@ -121,9 +175,26 @@ end`;
                 </code>
               </pre>
             </div>
-            <div className="mt-4 p-4 bg-muted/30 border border-border rounded text-sm font-mono text-muted-foreground space-y-2">
-              <div><strong className="text-foreground">Executor support:</strong> Auto-detects HTTP function — works with Synapse X <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">syn.request</code>, KRNL/Fluxus/Solara <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">request</code>, and legacy <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">http_request</code>.</div>
-              <div><strong className="text-foreground">Setup:</strong> Replace <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">YOUR-DOMAIN</code> with your deployed URL, set the <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">LICENSE_KEY</code> and <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">SCRIPT_ID</code>.</div>
+            <div className="mt-4 space-y-3">
+              <div className="p-4 bg-muted/30 border border-border rounded text-sm font-mono text-muted-foreground">
+                <div className="text-foreground font-bold mb-2">Supported executors</div>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                  {[
+                    "Solara","KRNL","Delta","Fluxus","Script-Ware",
+                    "Electron","Wave","Oxygen U","Evon","Celery",
+                    "Arceus X","Hydrogen","Vega X","Xeno","Comet",
+                    "AWP X","Nihon","Temple","Coco Z","JJSploit",
+                    "Synapse X","WeAreDevs API","+ any executor with request()",""
+                  ].map((name, i) => name ? (
+                    <span key={i} className="flex items-center gap-1">
+                      <span className="text-primary">▸</span> {name}
+                    </span>
+                  ) : null)}
+                </div>
+              </div>
+              <div className="p-4 bg-muted/30 border border-border rounded text-sm font-mono text-muted-foreground">
+                <strong className="text-foreground">Setup:</strong> Replace <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">YOUR-DOMAIN</code> with your deployed URL, then set <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">LICENSE_KEY</code> and <code className="bg-background px-1 py-0.5 rounded text-primary border border-border">SCRIPT_ID</code> at the top of the script. Nothing else needs to change.
+              </div>
             </div>
           </CardContent>
         </Card>
