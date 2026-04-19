@@ -11,6 +11,12 @@ out-tsc
 # dependencies
 node_modules
 
+# Firebase & secrets
+service-account-key.json
+.env
+.env.local
+.env.*.local
+
 # IDEs and editors
 /.idea
 .project
@@ -46,4 +52,6 @@ Thumbs.db
 
 # Replit
 .cache/
-.local/
+.local/32
+
+.artifacts\api-server\service-account-key.json
