@@ -53,5 +53,3 @@ Thumbs.db
 # Replit
 .cache/
 .local/32
-
-.artifacts\api-server\service-account-key.json
