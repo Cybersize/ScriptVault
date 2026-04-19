@@ -73,7 +73,7 @@ export default function AdminLogs() {
                     Reading logs...
                   </TableCell>
                 </TableRow>
-              ) : logs && logs.length > 0 ? (
+              ) : Array.isArray(logs) && logs.length > 0 ? (
                 logs.map((log) => (
                   <TableRow key={log.id} className="border-border font-mono text-xs">
                     <TableCell className="text-muted-foreground whitespace-nowrap">

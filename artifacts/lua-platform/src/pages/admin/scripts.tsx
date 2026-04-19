@@ -130,7 +130,7 @@ export default function AdminScripts() {
             <div className="py-12 text-center text-muted-foreground font-mono text-sm border border-border rounded-lg bg-card">
               Loading scripts...
             </div>
-          ) : scripts && scripts.length > 0 ? (
+          ) : Array.isArray(scripts) && scripts.length > 0 ? (
             scripts.map(script => (
               <Card key={script.id} className="border-border bg-card">
                 <CardHeader className="pb-3 flex flex-row items-start justify-between">

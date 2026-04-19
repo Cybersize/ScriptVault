@@ -1,7 +1,6 @@
 import { Router, type IRouter } from "express";
-import { eq, desc, ilike, or } from "drizzle-orm";
-import { db, licensesTable } from "@workspace/db";
 import { randomBytes } from "crypto";
+import { db, Timestamp, COLLECTIONS } from "../../lib/firestore";
 import {
   CreateLicenseBody,
   UpdateLicenseBody,
@@ -19,16 +18,16 @@ function generateKey(): string {
   return `${part()}-${part()}-${part()}-${part()}`;
 }
 
-function mapLicense(lic: typeof licensesTable.$inferSelect) {
+function mapLicense(id: string, data: any) {
   return {
-    id: lic.id,
-    key: lic.key,
-    hwid: lic.hwid ?? null,
-    expiresAt: lic.expiresAt ? lic.expiresAt.toISOString() : null,
-    revoked: lic.revoked,
-    note: lic.note ?? null,
-    createdAt: lic.createdAt.toISOString(),
-    usageCount: lic.usageCount,
+    id,
+    key: data.key,
+    hwid: data.hwid ?? null,
+    expiresAt: data.expiresAt ? data.expiresAt.toDate().toISOString() : null,
+    revoked: data.revoked,
+    note: data.note ?? null,
+    createdAt: data.createdAt.toDate().toISOString(),
+    usageCount: data.usageCount,
   };
 }
 
@@ -39,21 +38,24 @@ router.get("/admin/licenses", async (req, res): Promise<void> => {
     return;
   }
 
-  let query = db.select().from(licensesTable).orderBy(desc(licensesTable.createdAt)).$dynamic();
+  let query = db
+    .collection(COLLECTIONS.LICENSES)
+    .orderBy("createdAt", "desc");
 
-  const { status, search } = params.data;
+  const { status } = params.data;
   if (status === "active") {
-    query = query.where(eq(licensesTable.revoked, false));
+    query = query.where("revoked", "==", false);
   } else if (status === "revoked") {
-    query = query.where(eq(licensesTable.revoked, true));
+    query = query.where("revoked", "==", true);
   }
 
-  const licenses = await query;
+  const docs = await query.get();
+  let licenses = docs.docs.map((doc) => mapLicense(doc.id, doc.data()));
 
-  let result = licenses;
+  const { search } = params.data;
   if (search) {
     const s = search.toLowerCase();
-    result = licenses.filter(
+    licenses = licenses.filter(
       (l) =>
         l.key.toLowerCase().includes(s) ||
         (l.note && l.note.toLowerCase().includes(s)) ||
@@ -61,7 +63,7 @@ router.get("/admin/licenses", async (req, res): Promise<void> => {
     );
   }
 
-  res.json(result.map(mapLicense));
+  res.json(licenses);
 });
 
 router.post("/admin/licenses", async (req, res): Promise<void> => {
@@ -72,18 +74,25 @@ router.post("/admin/licenses", async (req, res): Promise<void> => {
   }
 
   const key = generateKey();
-  const expiresAt = parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null;
+  const expiresAt = parsed.data.expiresAt
+    ? Timestamp.fromDate(new Date(parsed.data.expiresAt))
+    : null;
 
-  const [license] = await db
-    .insert(licensesTable)
-    .values({
+  const docRef = await db
+    .collection(COLLECTIONS.LICENSES)
+    .add({
       key,
-      expiresAt: expiresAt ?? undefined,
+      hwid: null,
+      expiresAt,
+      revoked: false,
       note: parsed.data.note ?? null,
-    })
-    .returning();
+      usageCount: 0,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
 
-  res.status(201).json(mapLicense(license));
+  const doc = await docRef.get();
+  res.status(201).json(mapLicense(doc.id, doc.data()));
 });
 
 router.get("/admin/licenses/:id", async (req, res): Promise<void> => {
@@ -93,17 +102,18 @@ router.get("/admin/licenses/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [license] = await db
-    .select()
-    .from(licensesTable)
-    .where(eq(licensesTable.id, params.data.id));
+  const id = String(params.data.id);
+  const doc = await db
+    .collection(COLLECTIONS.LICENSES)
+    .doc(id)
+    .get();
 
-  if (!license) {
+  if (!doc.exists) {
     res.status(404).json({ error: "License not found" });
     return;
   }
 
-  res.json(mapLicense(license));
+  res.json(mapLicense(doc.id, doc.data()));
 });
 
 router.patch("/admin/licenses/:id", async (req, res): Promise<void> => {
@@ -119,26 +129,33 @@ router.patch("/admin/licenses/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const updates: Partial<typeof licensesTable.$inferInsert> = {};
+  const id = String(params.data.id);
+  const updates: any = { updatedAt: Timestamp.now() };
   if (parsed.data.revoked != null) updates.revoked = parsed.data.revoked;
   if (parsed.data.expiresAt !== undefined) {
-    updates.expiresAt = parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : undefined;
+    updates.expiresAt = parsed.data.expiresAt
+      ? Timestamp.fromDate(new Date(parsed.data.expiresAt))
+      : null;
   }
   if (parsed.data.note !== undefined) updates.note = parsed.data.note ?? null;
   if (parsed.data.hwid !== undefined) updates.hwid = parsed.data.hwid ?? null;
 
-  const [license] = await db
-    .update(licensesTable)
-    .set(updates)
-    .where(eq(licensesTable.id, params.data.id))
-    .returning();
+  await db
+    .collection(COLLECTIONS.LICENSES)
+    .doc(id)
+    .update(updates);
 
-  if (!license) {
+  const doc = await db
+    .collection(COLLECTIONS.LICENSES)
+    .doc(id)
+    .get();
+
+  if (!doc.exists) {
     res.status(404).json({ error: "License not found" });
     return;
   }
 
-  res.json(mapLicense(license));
+  res.json(mapLicense(doc.id, doc.data()));
 });
 
 router.delete("/admin/licenses/:id", async (req, res): Promise<void> => {
@@ -148,15 +165,11 @@ router.delete("/admin/licenses/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [license] = await db
-    .delete(licensesTable)
-    .where(eq(licensesTable.id, params.data.id))
-    .returning();
-
-  if (!license) {
-    res.status(404).json({ error: "License not found" });
-    return;
-  }
+  const id = String(params.data.id);
+  await db
+    .collection(COLLECTIONS.LICENSES)
+    .doc(id)
+    .delete();
 
   res.sendStatus(204);
 });
@@ -168,18 +181,23 @@ router.post("/admin/licenses/:id/revoke", async (req, res): Promise<void> => {
     return;
   }
 
-  const [license] = await db
-    .update(licensesTable)
-    .set({ revoked: true })
-    .where(eq(licensesTable.id, params.data.id))
-    .returning();
+  const id = String(params.data.id);
+  await db
+    .collection(COLLECTIONS.LICENSES)
+    .doc(id)
+    .update({ revoked: true, updatedAt: Timestamp.now() });
 
-  if (!license) {
+  const doc = await db
+    .collection(COLLECTIONS.LICENSES)
+    .doc(id)
+    .get();
+
+  if (!doc.exists) {
     res.status(404).json({ error: "License not found" });
     return;
   }
 
-  res.json(mapLicense(license));
+  res.json(mapLicense(doc.id, doc.data()));
 });
 
 export default router;

@@ -1,21 +1,20 @@
 import { Router, type IRouter } from "express";
-import { eq, desc } from "drizzle-orm";
-import { db, accessLogsTable } from "@workspace/db";
+import { db, COLLECTIONS } from "../../lib/firestore";
 import { ListLogsQueryParams } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
-function mapLog(l: typeof accessLogsTable.$inferSelect) {
+function mapLog(id: string, data: any) {
   return {
-    id: l.id,
-    licenseId: l.licenseId ?? null,
-    licenseKey: l.licenseKey ?? null,
-    scriptId: l.scriptId ?? null,
-    ip: l.ip ?? null,
-    hwid: l.hwid ?? null,
-    status: l.status,
-    message: l.message ?? null,
-    createdAt: l.createdAt.toISOString(),
+    id,
+    licenseId: data.licenseId ?? null,
+    licenseKey: data.licenseKey ?? null,
+    scriptId: data.scriptId ?? null,
+    ip: data.ip ?? null,
+    hwid: data.hwid ?? null,
+    status: data.status,
+    message: data.message ?? null,
+    createdAt: data.createdAt.toDate().toISOString(),
   };
 }
 
@@ -29,20 +28,18 @@ router.get("/admin/logs", async (req, res): Promise<void> => {
   const { licenseId, status, limit } = params.data;
 
   let query = db
-    .select()
-    .from(accessLogsTable)
-    .orderBy(desc(accessLogsTable.createdAt))
-    .limit(limit ?? 200)
-    .$dynamic();
+    .collection(COLLECTIONS.ACCESS_LOGS)
+    .orderBy("createdAt", "desc")
+    .limit(limit ?? 200);
 
   if (licenseId) {
-    query = query.where(eq(accessLogsTable.licenseId, licenseId));
+    query = query.where("licenseId", "==", licenseId);
   } else if (status) {
-    query = query.where(eq(accessLogsTable.status, status));
+    query = query.where("status", "==", status);
   }
 
-  const logs = await query;
-  res.json(logs.map(mapLog));
+  const docs = await query.get();
+  res.json(docs.docs.map((doc) => mapLog(doc.id, doc.data())));
 });
 
 export default router;

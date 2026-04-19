@@ -1,7 +1,6 @@
 import { Router, type IRouter } from "express";
-import { db, scriptsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
-import { validateKey, logAccess } from "../lib/licenseUtils";
+import { db, COLLECTIONS } from "../lib/firestore";
+import { validateKey, logAccess } from "../lib/licenseUtils-firestore";
 import { decrypt } from "../lib/crypto";
 import { rateLimit } from "../middlewares/rateLimit";
 import { ValidateLicenseBody, DeliverScriptBody, DeliverScriptParams } from "@workspace/api-zod";
@@ -42,18 +41,20 @@ router.post("/scripts/:scriptId/deliver", rateLimit, async (req, res): Promise<v
   }
 
   const { key, hwid } = bodyParsed.data;
-  const { scriptId } = params.data;
+  const scriptId = String(params.data.scriptId);
   const ip = req.ip;
 
-  const [script] = await db
-    .select()
-    .from(scriptsTable)
-    .where(eq(scriptsTable.id, scriptId));
+  const scriptDoc = await db
+    .collection(COLLECTIONS.SCRIPTS)
+    .doc(scriptId)
+    .get();
 
-  if (!script) {
+  if (!scriptDoc.exists) {
     res.status(404).json({ error: "Script not found" });
     return;
   }
+
+  const script = scriptDoc.data();
 
   const result = await validateKey(key, hwid, ip, scriptId);
 
@@ -63,7 +64,7 @@ router.post("/scripts/:scriptId/deliver", rateLimit, async (req, res): Promise<v
   }
 
   // Decrypt in memory and watermark
-  const decrypted = decrypt(script.encryptedPath, script.iv, script.authTag);
+  const decrypted = decrypt(script!.encryptedPath, script!.iv, script!.authTag);
   const watermarked = `-- Licensed to: ${key} | HWID: ${hwid}\n${decrypted}`;
 
   await logAccess({
@@ -73,10 +74,10 @@ router.post("/scripts/:scriptId/deliver", rateLimit, async (req, res): Promise<v
     ip: ip ?? undefined,
     scriptId,
     status: "success",
-    message: `Delivered script: ${script.name} v${script.version}`,
+    message: `Delivered script: ${script!.name} v${script!.version}`,
   });
 
-  res.json({ script: watermarked, version: script.version });
+  res.json({ script: watermarked, version: script!.version });
 });
 
 export default router;

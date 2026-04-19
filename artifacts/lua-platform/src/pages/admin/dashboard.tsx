@@ -100,7 +100,7 @@ export default function AdminDashboard() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {stats.recentActivity.length > 0 ? (
+                {Array.isArray(stats.recentActivity) && stats.recentActivity.length > 0 ? (
                   <div className="space-y-4">
                     {stats.recentActivity.map((log) => (
                       <div key={log.id} className="flex items-center justify-between border-b border-border/50 pb-4 last:border-0 last:pb-0">

@@ -1,46 +1,56 @@
 import { Router, type IRouter } from "express";
-import { eq, count, desc } from "drizzle-orm";
-import { db, licensesTable, scriptsTable, accessLogsTable } from "@workspace/db";
+import { db, COLLECTIONS } from "../../lib/firestore";
 
 const router: IRouter = Router();
 
-function mapLog(l: typeof accessLogsTable.$inferSelect) {
+function mapLog(id: string, data: any) {
   return {
-    id: l.id,
-    licenseId: l.licenseId ?? null,
-    licenseKey: l.licenseKey ?? null,
-    scriptId: l.scriptId ?? null,
-    ip: l.ip ?? null,
-    hwid: l.hwid ?? null,
-    status: l.status,
-    message: l.message ?? null,
-    createdAt: l.createdAt.toISOString(),
+    id,
+    licenseId: data.licenseId ?? null,
+    licenseKey: data.licenseKey ?? null,
+    scriptId: data.scriptId ?? null,
+    ip: data.ip ?? null,
+    hwid: data.hwid ?? null,
+    status: data.status,
+    message: data.message ?? null,
+    createdAt: data.createdAt.toDate().toISOString(),
   };
 }
 
 router.get("/admin/stats", async (_req, res): Promise<void> => {
-  const [licenseStats, scriptStats, logStats, recentActivity] = await Promise.all([
-    db.select().from(licensesTable),
-    db.select({ count: count() }).from(scriptsTable),
-    db.select().from(accessLogsTable),
+  const [licensesDocs, scriptsDocs, accessLogsDocs, recentLogsDocs] = await Promise.all([
+    db.collection(COLLECTIONS.LICENSES).get(),
+    db.collection(COLLECTIONS.SCRIPTS).get(),
+    db.collection(COLLECTIONS.ACCESS_LOGS).get(),
     db
-      .select()
-      .from(accessLogsTable)
-      .orderBy(desc(accessLogsTable.createdAt))
-      .limit(20),
+      .collection(COLLECTIONS.ACCESS_LOGS)
+      .orderBy("createdAt", "desc")
+      .limit(20)
+      .get(),
   ]);
 
+  const licenses = licensesDocs.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+  const scripts = scriptsDocs.docs;
+  const logs = accessLogsDocs.docs.map((doc) => doc.data());
+  const recentLogs = recentLogsDocs.docs;
+
   const now = new Date();
-  const totalLicenses = licenseStats.length;
-  const revokedLicenses = licenseStats.filter((l) => l.revoked).length;
-  const expiredLicenses = licenseStats.filter(
-    (l) => !l.revoked && l.expiresAt != null && l.expiresAt < now
+  const totalLicenses = licenses.length;
+  const revokedLicenses = licenses.filter((l) => l.revoked).length;
+  const expiredLicenses = licenses.filter(
+    (l) =>
+      !l.revoked &&
+      l.expiresAt != null &&
+      l.expiresAt.toDate() < now
   ).length;
   const activeLicenses = totalLicenses - revokedLicenses - expiredLicenses;
 
-  const totalScripts = scriptStats[0]?.count ?? 0;
-  const totalRequests = logStats.length;
-  const successfulRequests = logStats.filter((l) => l.status === "success").length;
+  const totalScripts = scripts.length;
+  const totalRequests = logs.length;
+  const successfulRequests = logs.filter((l) => l.status === "success").length;
   const failedRequests = totalRequests - successfulRequests;
 
   res.json({
@@ -52,7 +62,7 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
     totalRequests,
     successfulRequests,
     failedRequests,
-    recentActivity: recentActivity.map(mapLog),
+    recentActivity: recentLogs.map((doc) => mapLog(doc.id, doc.data())),
   });
 });
 

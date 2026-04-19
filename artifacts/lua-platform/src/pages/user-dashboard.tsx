@@ -123,7 +123,7 @@ loadstring(game:HttpGet("https://your-domain.replit.app/api/scripts/${scriptId}/
                 <div className="py-8 text-center text-muted-foreground font-mono text-sm">
                   Loading scripts...
                 </div>
-              ) : scripts && scripts.length > 0 ? (
+              ) : Array.isArray(scripts) && scripts.length > 0 ? (
                 <div className="space-y-4">
                   {scripts.map(script => (
                     <div key={script.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-border rounded-lg bg-background gap-4">

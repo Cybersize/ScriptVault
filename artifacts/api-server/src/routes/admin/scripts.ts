@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, desc } from "drizzle-orm";
-import { db, scriptsTable } from "@workspace/db";
+import { db, Timestamp, COLLECTIONS } from "../../lib/firestore";
 import { encrypt } from "../../lib/crypto";
 import {
   CreateScriptBody,
@@ -10,25 +9,25 @@ import {
 
 const router: IRouter = Router();
 
-function mapScript(s: typeof scriptsTable.$inferSelect) {
+function mapScript(id: string, data: any) {
   return {
-    id: s.id,
-    name: s.name,
-    description: s.description ?? null,
-    version: s.version,
-    encryptedPath: s.encryptedPath,
-    createdAt: s.createdAt.toISOString(),
-    updatedAt: s.updatedAt.toISOString(),
+    id,
+    name: data.name,
+    description: data.description ?? null,
+    version: data.version,
+    encryptedPath: data.encryptedPath,
+    createdAt: data.createdAt.toDate().toISOString(),
+    updatedAt: data.updatedAt.toDate().toISOString(),
   };
 }
 
 router.get("/admin/scripts", async (_req, res): Promise<void> => {
-  const scripts = await db
-    .select()
-    .from(scriptsTable)
-    .orderBy(desc(scriptsTable.createdAt));
+  const docs = await db
+    .collection(COLLECTIONS.SCRIPTS)
+    .orderBy("createdAt", "desc")
+    .get();
 
-  res.json(scripts.map(mapScript));
+  res.json(docs.docs.map((doc) => mapScript(doc.id, doc.data())));
 });
 
 router.post("/admin/scripts", async (req, res): Promise<void> => {
@@ -42,19 +41,19 @@ router.post("/admin/scripts", async (req, res): Promise<void> => {
 
   const { encrypted, iv, authTag } = encrypt(content);
 
-  const [script] = await db
-    .insert(scriptsTable)
-    .values({
-      name,
-      description: description ?? null,
-      version,
-      encryptedPath: encrypted,
-      iv,
-      authTag,
-    })
-    .returning();
+  const docRef = await db.collection(COLLECTIONS.SCRIPTS).add({
+    name,
+    description: description ?? null,
+    version,
+    encryptedPath: encrypted,
+    iv,
+    authTag,
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  });
 
-  res.status(201).json(mapScript(script));
+  const doc = await docRef.get();
+  res.status(201).json(mapScript(doc.id, doc.data()));
 });
 
 router.get("/admin/scripts/:id", async (req, res): Promise<void> => {
@@ -64,17 +63,18 @@ router.get("/admin/scripts/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [script] = await db
-    .select()
-    .from(scriptsTable)
-    .where(eq(scriptsTable.id, params.data.id));
+  const id = String(params.data.id);
+  const doc = await db
+    .collection(COLLECTIONS.SCRIPTS)
+    .doc(id)
+    .get();
 
-  if (!script) {
+  if (!doc.exists) {
     res.status(404).json({ error: "Script not found" });
     return;
   }
 
-  res.json(mapScript(script));
+  res.json(mapScript(doc.id, doc.data()));
 });
 
 router.delete("/admin/scripts/:id", async (req, res): Promise<void> => {
@@ -84,15 +84,21 @@ router.delete("/admin/scripts/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [script] = await db
-    .delete(scriptsTable)
-    .where(eq(scriptsTable.id, params.data.id))
-    .returning();
+  const id = String(params.data.id);
+  const doc = await db
+    .collection(COLLECTIONS.SCRIPTS)
+    .doc(id)
+    .get();
 
-  if (!script) {
+  if (!doc.exists) {
     res.status(404).json({ error: "Script not found" });
     return;
   }
+
+  await db
+    .collection(COLLECTIONS.SCRIPTS)
+    .doc(id)
+    .delete();
 
   res.sendStatus(204);
 });

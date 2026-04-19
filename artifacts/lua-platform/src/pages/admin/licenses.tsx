@@ -149,7 +149,7 @@ export default function AdminLicenses() {
                     Loading keys...
                   </TableCell>
                 </TableRow>
-              ) : licenses && licenses.length > 0 ? (
+              ) : Array.isArray(licenses) && licenses.length > 0 ? (
                 licenses.map((license) => (
                   <TableRow key={license.id} className="border-border">
                     <TableCell className="font-mono text-sm font-medium">

@@ -1,0 +1,27 @@
+{
+  "name": "firebase-functions",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "serve": "firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@workspace/api-zod": "workspace:*",
+    "dotenv": "^16.3.1",
+    "firebase-admin": "^12.5.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "catalog:",
+    "express": "^5.0.0",
+    "typescript": "~5.9.2"
+  }
+}
